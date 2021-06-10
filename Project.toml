@@ -1,0 +1,13 @@
+name = "Oolong"
+uuid = "c9dcc2fc-6356-41de-aa29-480ea90c21cd"
+authors = ["Jun Tian <tianjun.cpp@gmail.com> and contributors"]
+version = "0.1.0"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
