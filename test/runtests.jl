@@ -1,6 +1,8 @@
 using Oolong
 using Test
+using Base.Threads
 
 @testset "Oolong.jl" begin
-    # Write your tests here.
+    include("core.jl")
+    include("serve.jl")
 end
