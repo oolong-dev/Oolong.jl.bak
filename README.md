@@ -1,6 +1,6 @@
 # Oolong.jl
 
-*An actor framework for [ReinforcementLearning.jl](https://github.com/JuliaReinforcementLearning/ReinforcementLearning.jl)*
+*An actor framework for [~~ReinforcementLearning.jl~~](https://github.com/JuliaReinforcementLearning/ReinforcementLearning.jl) <ins>distributed computing</ins> in Julia.*
 
 > “是非成败转头空” —— [《临江仙》](https://www.vincentpoon.com/the-immortals-by-the-river-----------------.html)
 > [杨慎](https://zh.wikipedia.org/zh-hans/%E6%9D%A8%E6%85%8E)
@@ -12,25 +12,66 @@
 > 
 > (Translated by [Xu Yuanchong](https://en.wikipedia.org/wiki/Xu_Yuanchong))
 
+
+## Features
+
+- Non-invasive
+  Users can easily extend existing packages to apply them in a cluster.
+
+- Simple API
+  
+
 ## Roadmap
 
-- [x] Figure out a set of simple primitives for running distributed
-  applications.
-- [ ] Apply this package to some typical RL algorithms:
-  - [x] Parameter server
-  - [x] Batch serving
-    - [ ] Add macro to expose a http endpoint
-  - [ ] A3C
-  - [ ] D4PG
-  - [ ] AlphaZero
-  - [ ] Deep CFR
-  - [ ] NFSP
-  - [ ] Evolution algorithms
-- [ ] Resource management across nodes
-- [ ] State persistence and fault tolerance
-- [ ] Configurable logging and dashboard
-  - [LokiLogger.jl](https://github.com/fredrikekre/LokiLogger.jl)
-  - [Stipple.jl](https://github.com/GenieFramework/Stipple.jl)
+- Stage 1
+  - [ ] Stabilize API
+    - [ ] `@pot`, define a container over any callable object.
+    - [ ] `-->`, `<--`, define a streaming pipeline.
+  - [ ] Example usages
+- Stage 2
+  - [ ] Auto-scaling. Allow workers join/exit.
+    - [ ] Custom cluster manager
+  - [ ] Dashboard
+    - [ ] [grafana](https://grafana.com/)
+  - [ ] Custom Logger
+    - [LokiLogger.jl](https://github.com/fredrikekre/LokiLogger.jl)
+    - [Stipple.jl](https://github.com/GenieFramework/Stipple.jl)
+- Stage 3
+  - [ ] Drop out Distributed.jl?
+  - [ ] K8S
+
+## Design
+
+```
+      +--------+
+      | Flavor |
+      +--------+
+          |
+          V         +-------------+
+      +---+---+     | Pot         |
+      | PotID |<===>|             |
+      +---+---+     |  PotID      |
+          |         |  () -> Tea  |
+          |         +-------------+
+  +-------|-------------------------+
+  |       V        boiled somewhere |
+  |  +----+----+                    |
+  |  | Channel |                    |
+  |  +----+----+                    |
+  |       |                         |
+  |       V        +-----------+    |
+  |    +--+--+     | PotState  |    |
+  |    | Tea |<===>|           |    |
+  |    +--+--+     |  Children |    |
+  |       |        +-----------+    |
+  |       V                         |
+  |  +----+----+                    |
+  |  | Future  |                    |
+  |  +---------+                    |
+  +---------------------------------+
+```
+
+A `Pot` is mainly a container of an arbitrary object (`tea`) which is instantiated by calling a parameterless function. Whenever a `Pot` receives a `flavor` through the `channel`, the water in the `Pot` is *boiled* first (a `task` to process `tea` and `flavor` is created) if it is cool (the previous `task` was exited by accident or on demand). Users can define how `tea` and `flavor` are processed through multiple dispatch on `process(tea, flavor)`. In some `task`s, users may create many other `Pot`s whose references (`PotID`) are stored in `Children`.  A `PotID` is simply a path used to locate a `Pot`.
 
 ## Get Started
 
@@ -44,86 +85,14 @@ pkg> activate --temp
 pkg> add https://github.com/JuliaReinforcementLearning/Oolong.jl
 ```
 
-`Oolong.jl` adopts the [actor model](https://en.wikipedia.org/wiki/Actor_model) to
-parallelize your existing code. One of the core APIs defined in this package is
-the `@actor` macro.
 
-```julia
-using Oolong
-
-A = @actor () -> @info "Hello World"
-```
-
-By putting the `@actor` macro before arbitrary callable object, we defined an
-**actor**. And we can call it as usual:
-
-```julia
-A();
-```
-
-You'll see something like this on your screen:
-
-```
-Info:[2021-06-30 22:59:51](@/user/#1)Hello World
-```
-
-Next, let's make sure anonymous functions with positional and keyword arguments
-can also work as expected:
-
-```julia
-A = @actor (msg;suffix="!") -> @info "Hello " * msg * suffix
-A("World";suffix="!!!")
-# Info:[2021-06-30 23:00:38](@/user/#5)Hello World!!!
-```
-
-For some functions, we are more interested in the returned value.
-
-```julia
-A = @actor msg -> "Hello " * msg
-res = A("World")
-```
-
-Well, different from the general function call, a result similar to `Future` is
-returned instead of the real value. We can then fetch the result with the
-following syntax:
-
-```julia
-res[]
-# "Hello World"
-```
-
-To maintain the internal states across different calls, we can also apply `@actor`
-to a customized structure:
-
-```julia
-Base.@kwdef mutable struct Counter
-    n::Int = 0
-end
-
-(c::Counter)() = c.n += 1
-
-A = @actor Counter()
-
-for _ in 1:10
-    A()
-end
-
-n = A.n
-
-n[]
-# 10
-```
-
-Note that similar to function call, the return of `A.n` is also a `Future` like object.
-
-### Tips
-
-- Be careful with `self()`
+### FAQ
 
 ## Acknowledgement
 
 This package is mainly inspired by the following packages:
 
-- [Actors.jl](https://github.com/JuliaActors/Actors.jl)
 - [Proto.Actor](https://proto.actor/)
 - [Ray](https://ray.io/)
+- [Orleans](https://github.com/dotnet//orleans)
+- [Actors.jl](https://github.com/JuliaActors/Actors.jl)
