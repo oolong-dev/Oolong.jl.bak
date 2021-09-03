@@ -19,26 +19,37 @@
   Users can easily extend existing packages to apply them in a cluster.
 
 - Simple API
-  
+  Only very minimal APIs are provided to ease the usage.
 
 ## Roadmap
 
 - Stage 1
   - [ ] Stabilize API
-    - [ ] `@pot`, define a container over any callable object.
+    - [x] `@pot tea [prop=value...]`, define a container over any callable object.
+    - [x] `(p::PotID)(args...;kw...)`, async call, at most once delievery, a `Promise` is returned.
+    - [x] `msg |> p::PotID`, async call, at most once delievery, no return.
+    - [x] `(p::PotID).prop`, async call, at most once delievery, return the `prop` of the inner `tea`.
     - [ ] `-->`, `<--`, define a streaming pipeline.
+  - [ ] Features
+    - [x] Logging. All messages are sent to primary node by default.
+    - [ ] RemoteREPL
+    - [x] CPU/GPU allocation
+    - [ ] Auto intall+using dependencies
   - [ ] Example usages
 - Stage 2
-  - [ ] Auto-scaling. Allow workers join/exit.
+  - [ ] Auto-scaling. Allow workers join/exit?
     - [ ] Custom cluster manager
   - [ ] Dashboard
     - [ ] [grafana](https://grafana.com/)
   - [ ] Custom Logger
     - [LokiLogger.jl](https://github.com/fredrikekre/LokiLogger.jl)
     - [Stipple.jl](https://github.com/GenieFramework/Stipple.jl)
+  - [ ] Tracing
 - Stage 3
   - [ ] Drop out Distributed.jl?
   - [ ] K8S
+  - [ ] differentiate accross pots?
+  - [ ] Python client (transpile, pickle)
 
 ## Design
 
@@ -52,6 +63,7 @@
       | PotID |<===>|             |
       +---+---+     |  PotID      |
           |         |  () -> Tea  |
+          |         |  require    |
           |         +-------------+
   +-------|-------------------------+
   |       V        boiled somewhere |
