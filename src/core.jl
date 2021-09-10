@@ -9,6 +9,91 @@ using Dates
 
 const KEY = :OOLONG
 
+#####
+# basic
+#####
+
+"""
+Similar to `Future`, but it will unwrap inner `Future` or `Promise` recursively when trying to get the *promised* value.
+"""
+struct Promise
+    f::Future
+    function Promise(args...)
+        new(Future(args...))
+    end
+end
+
+function Base.getindex(p::Promise)
+    x = p.f[]
+    while x isa Promise || x isa Future
+        x = x[]
+    end
+    x
+end
+
+Base.put!(p::Promise, x) = put!(p.f, x)
+
+#####
+
+struct PotNotRegisteredError <: Exception
+    pid::PotID
+end
+
+Base.showerror(io::IO, err::PotNotRegisteredError) = print(io, "can not find any pot associated with the pid: $(err.pid)")
+
+#####
+
+struct RequireInfo
+    cpu::Float64
+    gpu::Float64
+end
+
+Base.:(<=)(x::RequireInfo, y::RequireInfo) = x.cpu <= y.cpu && x.gpu <= y.gpu
+Base.:(-)(x::RequireInfo, y::RequireInfo) = RequireInfo(x.cpu - y.cpu, x.gpu - y.gpu)
+
+struct RequirementNotSatisfiedError <: Exception
+    required::RequireInfo
+    remaining::RequireInfo
+end
+
+Base.showerror(io::IO, err::RequirementNotSatisfiedError) = print(io, "required: $(err.required), remaining: $(err.remaining)")
+
+#####
+
+"System level messages are processed immediately"
+abstract type AbstractSysMsg end
+
+is_prioritized(msg) = false
+is_prioritized(msg::AbstractSysMsg) = true
+
+# !!! force system level messages to be executed immediately
+# directly copied from
+# https://github.com/JuliaLang/julia/blob/6aaedecc447e3d8226d5027fb13d0c3cbfbfea2a/base/channels.jl#L13-L31
+# with minor modification
+function Base.put_buffered(c::Channel, v)
+    lock(c)
+    try
+        while length(c.data) == c.sz_max
+            Base.check_channel_state(c)
+            wait(c.cond_put)
+        end
+        if is_prioritized(v)
+            pushfirst!(c.data, v)  # !!! force sys msg to be handled immediately
+        else
+            push!(c.data, v)  # !!! force sys msg to be handled immediately
+        end
+        # notify all, since some of the waiters may be on a "fetch" call.
+        notify(c.cond_take, nothing, true, false)
+    finally
+        unlock(c)
+    end
+    return v
+end
+
+#####
+# PotID
+#####
+
 struct PotID
     path::Tuple{Vararg{Symbol}}
 end
@@ -27,7 +112,7 @@ end
 
 function Base.show(io::IO, p::PotID)
     if isempty(getfield(p, :path))
-        print(io, '/')
+        print(io, "/")
     else
         for x in getfield(p, :path)
             print(io, '/')
@@ -41,54 +126,132 @@ function PotID(s::String)
         if s[1] == '/'
             PotID(Tuple(Symbol(x) for x in split(s, '/';keepempty=false)))
         else
-            self() * s
+            self() / s
         end
     else
         PotID(())
     end
 end
 
-Base.:(*)(p::PotID, s::String) = PotID((getfield(p, :path)..., (Symbol(x) for x in split(s, '/';keepempty=false))...))
+Base.:(/)(p::PotID, s::String) = PotID((getfield(p, :path)..., (Symbol(x) for x in split(s, '/';keepempty=false))...))
 
 const ROOT = P"/"
 const LOGGER = P"/log"
 const SCHEDULER = P"/scheduler"
 const USER = P"/user"
 
+#####
+# Message Processing
+#####
 
-# struct Success{V}
-#     value::V
-# end
+process(tea, args...;kw...) = tea(args...;kw...)
 
-# Base.getindex(s::Success{<:Success}) = s.value[]
-# Base.getindex(s::Success) = s.value
+#####
 
-# struct Failure{E}
-#     error::E
-# end
-
-# Failure() = Failure(nothing)
-
-# Base.getindex(f::Failure{<:Failure}) = f.error[]
-# Base.getindex(f::Failure) = f.error
-
-"Similar to `Future`, but it will unwrap inner `Future` or `Promise` recursively."
-struct Promise
-    f::Future
-    function Promise(args...)
-        new(Future(args...))
+function Base.put!(p::PotID, flavor)
+    try
+        put!(p[], flavor)
+    catch e
+        # TODO add test
+        if e isa PotNotRegisteredError
+            rethrow(e)
+        else
+            @error e
+            boil(p)
+            put!(p, flavor)
+        end
     end
 end
 
-function Base.getindex(p::Promise)
-    x = p.f[]
-    while x isa Promise || x isa Future
-        x = x[]
-    end
-    x
+#####
+
+struct CallMsg{A}
+    args::A
+    kw
+    promise
 end
 
-Base.put!(p::Promise, x) = put!(p.f, x)
+is_prioritized(::CallMsg{<:Tuple{<:AbstractSysMsg}}) = true
+
+function (p::PotID)(args...;kw...)
+    promise = Promise(whereis(p))  # !!! the result should reside in the same place
+    put!(p, CallMsg(args, kw.data, promise))
+    promise
+end
+
+# ??? non specialized tea?
+function process(tea, msg::CallMsg)
+    try
+        res = process(tea, msg.args...;msg.kw...)
+        put!(msg.promise, res)
+    catch err
+        # avoid dead lock
+        put!(msg.promise, err)
+    end
+end
+
+#####
+
+function Base.:(|>)(x, p::PotID)
+    put!(p, x)
+    nothing
+end
+
+#####
+
+struct GetPropMsg
+    prop::Symbol
+end
+
+Base.getproperty(p::PotID, prop::Symbol) = p(GetPropMsg(prop))
+
+process(tea, msg::GetPropMsg) = getproperty(tea, msg.prop)
+
+##### SysMsg
+
+"""
+Signal a Pot to close the channel and release claimed resources.
+By default, all children are closed recursively.
+"""
+struct CloseMsg <: AbstractSysMsg
+end
+
+Base.close(p::PotID) = p(CloseMsg())
+
+function process(tea, ::CloseMsg)
+    for c in children()
+        c(CloseMsg())[]
+    end
+end
+
+"""
+Close the active channel and remove the registered `Pot`.
+"""
+struct RemoveMsg <: AbstractSysMsg
+end
+
+Base.rm(p::PotID) = p(RemoveMsg())
+
+function process(tea, ::RemoveMsg)
+    for c in children()
+        c(RemoveMsg())[]
+    end
+    unregister(self())
+end
+
+struct ResumeMsg <: AbstractSysMsg
+end
+
+process(tea, ::ResumeMsg) = nothing
+
+struct RestartMsg <: AbstractSysMsg
+end
+
+struct PreRestartMsg <: AbstractSysMsg
+end
+
+struct PostRestartMsg <: AbstractSysMsg
+end
 
 #####
 # Logging
@@ -121,8 +284,8 @@ function (L::DefaultLogger)(msg::LogMsg)
         level, _module, group, id, file, line
     )
 
+    printstyled(iob, "$(kw.datetime) "; color=:light_black)
     printstyled(iob, prefix; bold=true, color=color)
-    printstyled(iob, "$(kw.datetime)"; color=:light_black)
     printstyled(iob, "[$(kw.from)@$(kw.myid)]"; color=:green)
     print(iob, message)
     for (k,v) in pairs(kw)
@@ -153,14 +316,6 @@ end
 #####
 # Pot Definition
 #####
-
-struct RequireInfo
-    cpu::Float64
-    gpu::Float64
-end
-
-Base.:(<=)(x::RequireInfo, y::RequireInfo) = x.cpu <= y.cpu && x.gpu <= y.gpu
-Base.:(-)(x::RequireInfo, y::RequireInfo) = RequireInfo(x.cpu - y.cpu, x.gpu - y.gpu)
 
 struct Pot
     tea_bag::Any
@@ -199,27 +354,12 @@ end
 _self() = get!(task_local_storage(), KEY, PotState(USER, current_task()))
 self() = _self().pid
 
-local_scheduler() = SCHEDULER*"local_scheduler_$(myid())"
+local_scheduler() = SCHEDULER/"local_scheduler_$(myid())"
 
 Base.parent() = parent(self())
 Base.parent(p::PotID) = PotID(getfield(p, :path[1:end-1]))
 
-#####
-# Exceptions
-#####
-
-struct PotNotRegisteredError <: Exception
-    pid::PotID
-end
-
-Base.showerror(io::IO, err::PotNotRegisteredError) = print(io, "can not find any pot associated with the pid: $(err.pid)")
-
-struct RequirementNotSatisfiedError <: Exception
-    required::RequireInfo
-    remaining::RequireInfo
-end
-
-Base.showerror(io::IO, err::RequirementNotSatisfiedError) = print(io, "required: $(err.required), remaining: $(err.remaining)")
+children() = children(self())
 
 #####
 # Pot Scheduling
@@ -227,18 +367,46 @@ Base.showerror(io::IO, err::RequirementNotSatisfiedError) = print(io, "required:
 
 # TODO: set ttl?
 
-"local cache to reduce remote call, we may use redis like db later"
+"""
+Local cache on each worker to reduce remote call.
+The links may be staled.
+"""
 const POT_LINK_CACHE = Dict{PotID, RemoteChannel{Channel{Any}}}()
-const POT_REGISTRY_CACHE = Dict{PotID, Pot}()
+
+"""
+Only valid on the driver to keep track of all registered pots.
+TODO: use a kv db
+"""
+const POT_REGISTRY = Dict{PotID, Pot}()
+const POT_CHILDREN = Dict{PotID, Set{PotID}}()
+
+function is_registered(p::Pot)
+    is_exist = remotecall_wait(1) do
+        haskey(Oolong.POT_REGISTRY, p.pid)
+    end
+    is_exist[]
+end
 
 function register(p::Pot)
-    POT_REGISTRY_CACHE[p.pid] = p
-    if myid() != 1
-        remotecall_wait(1) do
-            Oolong.POT_REGISTRY_CACHE[p.pid] = p
-        end
+    remotecall_wait(1) do
+        Oolong.POT_REGISTRY[p.pid] = p
+        children = get!(Oolong.POT_CHILDREN, parent(p.pid), Set{PotID}())
+        push!(children, p.pid)
     end
-    p
+end
+
+function unregister(p::PotID)
+    remotecall_wait(1) do
+        delete!(Oolong.POT_REGISTRY, p)
+        delete!(Oolong.POT_CHILDREN, p)
+    end
+end
+
+function children(p::PotID)
+    remotecall_wait(1) do
+        # ??? data race
+        get!(Oolong.POT_CHILDREN, p, Set{PotID}())
+    end
 end
 
 function link(p::PotID, ch::RemoteChannel)
@@ -266,18 +434,20 @@ end
 whereis(p::PotID) = p[].where
 
 function Base.getindex(p::PotID, ::typeof(!))
-    get!(POT_REGISTRY_CACHE, p) do
-        pot = remotecall_wait(1) do
-            get(Oolong.POT_REGISTRY_CACHE, p, nothing)
-        end
-        if isnothing(pot[])
-            throw(PotNotRegisteredError(p))
-        else
-            pot[]
-        end
+    pot = remotecall_wait(1) do
+        get(Oolong.POT_REGISTRY, p, nothing)
+    end
+    if isnothing(pot[])
+        throw(PotNotRegisteredError(p))
+    else
+        pot[]
     end
 end
 
+"""
+For debug only. Only a snapshot is returned.
+!!! DO NOT MODIFY THE RESULT DIRECTLY
+"""
 Base.getindex(p::PotID, ::typeof(*)) = p(_self())[]
 
 local_boil(p::PotID) = local_boil(p[!])
@@ -293,8 +463,25 @@ function local_boil(p::Pot)
                     try
                         flavor = take!(ch)
                         process(tea, flavor)
+                        if flavor isa CloseMsg || flavor isa RemoveMsg
+                            break
+                        end
                     catch err
-                        @error err
+                        @debug err
+                        flavor = parent()(err)[]
+                        if msg isa ResumeMsg
+                            process(tea, flavor)
+                        elseif msg isa CloseMsg
+                            process(tea, flavor)
+                            break
+                        elseif msg isa RestartMsg
+                            process(tea, PreRestartMsg())
+                            tea = tea_bag()
+                            process(tea, PostRestartMsg())
+                        else
+                            @error "unknown msg received from parent: $exec"
+                            rethrow()
+                        end
                     finally
                     end
                 end
@@ -449,67 +636,6 @@ function (s::Scheduler)(p::PotID)
     res
 end
 
-#####
-# Message passing
-#####
-
-function Base.put!(p::PotID, flavor)
-    try
-        put!(p[], flavor)
-    catch e
-        # TODO add test
-        if e isa PotNotRegisteredError
-            rethrow(e)
-        else
-            @error e
-            boil(p)
-            put!(p, flavor)
-        end
-    end
-end
-
-process(tea, flavor) = tea(flavor)
-
-# CallMsg
-
-struct CallMsg{A}
-    args::A
-    kw
-    promise
-end
-
-function (p::PotID)(args...;kw...)
-    promise = Promise(whereis(p))  # !!! the result should reside in the same place
-    put!(p, CallMsg(args, kw.data, promise))
-    promise
-end
-
-# ??? non specialized tea?
-function process(tea, msg::CallMsg)
-    try
-        res = handle(tea, msg.args...;msg.kw...)
-        put!(msg.promise, res)
-    catch err
-        # avoid dead lock
-        put!(msg.promise, err)
-    end
-end
-
-handle(tea, args...;kw...) = tea(args...;kw...)
-
-# CastMsg
-
-Base.:(|>)(x, p::PotID) = put!(p, x)
-
-# GetPropMsg
-
-struct GetPropMsg
-    prop::Symbol
-end
-
-Base.getproperty(p::PotID, prop::Symbol) = p(GetPropMsg(prop))
-
-handle(tea, msg::GetPropMsg) = getproperty(tea, msg.prop)
 
 #####
 # System Initialization
@@ -525,7 +651,56 @@ struct Root
     end
 end
 
-function start()
+function banner(io::IO=stdout;color=true)
+    c = Base.text_colors
+    tx = c[:normal] # text
+    d1 = c[:bold] * c[:blue]    # first dot
+    d2 = c[:bold] * c[:red]     # second dot
+    d3 = c[:bold] * c[:green]   # third dot
+    d4 = c[:bold] * c[:magenta] # fourth dot
+
+    if color
+        print(io,
+        """
+          ____        _                     |  > 是非成败转头空
+         / $(d1)__$(tx) \\      | |                    |  > Success or failure,
+        | $(d1)|  |$(tx) | ___ | | ___  _ __   __ _   |  > right or wrong,
+        | $(d1)|  |$(tx) |/ $(d2)_$(tx) \\| |/ $(d3)_$(tx) \\| '_ \\ / $(d4)_$(tx)` |  |  > all turn out vain.
+        | $(d1)|__|$(tx) | $(d2)(_)$(tx) | | $(d3)(_)$(tx) | | | | $(d4)(_)$(tx) |  |
+         \\____/ \\___/|_|\\___/|_| |_|\\__, |  |  The Immortals by the River
+                                     __/ |  |  -- Yang Shen 
+                                    |___/   |  (Translated by Xu Yuanchong) 
+        """)
+    else
+        print(io,
+        """
+          ____        _                     |  > 是非成败转头空
+         / __ \\      | |                    |  > Success or failure,
+        | |  | | ___ | | ___  _ __   __ _   |  > right or wrong,
+        | |  | |/ _ \\| |/ _ \\| '_ \\ / _` |  |  > all turn out vain.
+        | |__| | (_) | | (_) | | | | (_) |  |
+         \\____/ \\___/|_|\\___/|_| |_|\\__, |  |  The Immortals by the River
+                                     __/ |  |  -- Yang Shen 
+                                    |___/   |  (Translated by Xu Yuanchong) 
+        """)
+    end
+end
+
+function start(config_file::String="Oolong.yaml";kw...)
+    config = nothing
+    if isfile(config_file)
+        @info "Found $config_file. Loading configs..."
+        config = Configurations.from_dict(Config, YAML.load_file(config_file; dicttype=Dict{String, Any});kw...)
+    else
+        @info "$config_file not found. Using default configs."
+        config = Config(;kw...)
+    end
+    start(config)
+end
+
+function start(config::Config)
+    config.banner && banner(color=config.color)
+
     @info "$(@__MODULE__) starting..."
     if myid() == 1
         local_boil(@pot Root() name=ROOT logger=current_logger())
@@ -534,4 +709,7 @@ function start()
     if myid() in workers()
         local_boil(@pot LocalScheduler() name=local_scheduler())
     end
+end
+
+function stop()
 end

@@ -3,10 +3,7 @@ module Oolong
 const OL = Oolong
 export OL
 
+include("config.jl")
 include("core.jl")
-
-function __init__()
-    start()
-end
 
 end
