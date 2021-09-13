@@ -1,36 +1,28 @@
-# Oolong.jl
+<pre>
+<img src="./docs/logo.svg" alt="Oolong.jl logo" title="Oolong.jl" align="left" width="180"/>
+  ____        _                     |  > 是非成败转头空
+ / __ \      | |                    |  > Success or failure,
+| |  | | ___ | | ___  _ __   __ _   |  > right or wrong,
+| |  | |/ _ \| |/ _ \| '_ \ / _` |  |  > all turn out vain.
+| |__| | (_) | | (_) | | | | (_) |  |
+ \____/ \___/|_|\___/|_| |_|\__, |  |  <a href="https://www.vincentpoon.com/the-immortals-by-the-river-----------------.html">The Immortals by the River </a>
+                             __/ |  |  -- <a href="https://zh.wikipedia.org/zh-hans/%E6%9D%A8%E6%85%8E">Yang Shen </a>
+                            |___/   |  (Translated by <a href="https://en.wikipedia.org/wiki/Xu_Yuanchong">Xu Yuanchong</a>) 
+</pre>
 
-*An actor framework for [ReinforcementLearning.jl](https://github.com/JuliaReinforcementLearning/ReinforcementLearning.jl)*
+**Oolong.jl** is a framework for building scalable distributed applications in Julia.
 
-> “是非成败转头空” —— [《临江仙》](https://www.vincentpoon.com/the-immortals-by-the-river-----------------.html)
-> [杨慎](https://zh.wikipedia.org/zh-hans/%E6%9D%A8%E6%85%8E)
->
-> "Success or failure, right or wrong, all turn out vain." - [*The Immortals by
-> the
-> River*](https://www.vincentpoon.com/the-immortals-by-the-river-----------------.html),
-> [Yang Shen](https://en.wikipedia.org/wiki/Yang_Shen)
-> 
-> (Translated by [Xu Yuanchong](https://en.wikipedia.org/wiki/Xu_Yuanchong))
+## Features
 
-## Roadmap
+- Easy to use
+    Only very minimal APIs are exposed to make this package easy to use (yes, easier than [Distributed.jl](https://docs.julialang.org/en/v1/stdlib/Distributed/)).
 
-- [x] Figure out a set of simple primitives for running distributed
-  applications.
-- [ ] Apply this package to some typical RL algorithms:
-  - [x] Parameter server
-  - [x] Batch serving
-    - [ ] Add macro to expose a http endpoint
-  - [ ] A3C
-  - [ ] D4PG
-  - [ ] AlphaZero
-  - [ ] Deep CFR
-  - [ ] NFSP
-  - [ ] Evolution algorithms
-- [ ] Resource management across nodes
-- [ ] State persistence and fault tolerance
-- [ ] Configurable logging and dashboard
-  - [LokiLogger.jl](https://github.com/fredrikekre/LokiLogger.jl)
-  - [Stipple.jl](https://github.com/GenieFramework/Stipple.jl)
+- Non-invasive
+    Users can easily extend existing packages to apply them in a cluster.
+
+- Fault tolerance
+
+- Auto scaling
 
 ## Get Started
 
@@ -44,86 +36,114 @@ pkg> activate --temp
 pkg> add https://github.com/JuliaReinforcementLearning/Oolong.jl
 ```
 
-`Oolong.jl` adopts the [actor model](https://en.wikipedia.org/wiki/Actor_model) to
-parallelize your existing code. One of the core APIs defined in this package is
-the `@actor` macro.
+See tests for some example usages. (TODO: move typical examples here when APIs are stabled)
 
-```julia
-using Oolong
+## Examples
 
-A = @actor () -> @info "Hello World"
+- Batch evaluation.
+- AlphaZero
+- Parameter server
+- Parameter search
+
+Please contact us if you have a concrete scenario but not sure how to use this package!
+
+## Deployment
+
+### Local Machines
+
+### K8S
+
+## Roadmap
+
+1. Stage 1
+    1. Stabilize API
+        1. ☑️ `p::PotID = @pot tea [prop=value...]`, define a container over any callable object.
+        2. ☑️ `(p::PotID)(args...;kw...)`, which behaves just like `tea(args...;kw...)`, except that it's an async call, at most once delievery, a `Promise` is returned.
+        3. ☑️ `msg |> p::PotID` similar to the above one, except that nothing is returned.
+        4. ☑️ `(p::PotID).prop`, async call, at most once delievery, return the `prop` of the inner `tea`.
+        5. 🧐 `-->`, `<--`, define a streaming pipeline.
+        6. 🧐 timed wait on `Promise`.
+    2. Features
+        1. ☑️ Logging. All messages are sent to primary node by default.
+        2. 🧐 RemoteREPL
+        3. ☑️ CPU/GPU allocation
+        4. 🧐 Auto intall+using dependencies
+        5. ☑️ Global configuration
+        6. 🧐 Close pot when it is idle for a period
+    3.  Example usages
+        1. 🧐 Parameter search
+        2. 🧐 Batch evaluation.
+        3. 🧐 AlphaZero
+        4. 🧐 Parameter server
+2. Stage 2
+    1. Auto1.scaling. Allow workers join/exit?
+        1. 🧐 Custom cluster manager
+    2. Dashboard
+        1. 🧐 [grafana](https://grafana.com/)
+    3. Custom Logger
+        1. ☑️ [LokiLogger.jl](https://github.com/fredrikekre/LokiLogger.jl)
+        2. 🧐 [Stipple.jl](https://github.com/GenieFramework/Stipple.jl)
+    4. Tracing
+        1. [opentelemetry](https://opentelemetry.io/)
+1. Stage 3
+    1. Drop out Distributed.jl?
+        1. 🧐 `Future` will transfer the ownership of the underlying data to the caller. Not very efficient when the data is passed back and forth several times in its life circle.
+    2. 🧐 differentiate across pots?
+    3. 🧐 Python client (transpile, pickle)
+    4. 🧐 K8S
+    5. 🧐 JuliaHub
+    6. 🧐 AWS
+    7. 🧐 Azure
+
+## Design
+
+### Workflow
+
+```
+      +--------+
+      | Flavor |
+      +--------+
+          |
+          V         +-------------+
+      +---+---+     | Pot         |
+      | PotID |<===>|             |
+      +---+---+     |  PotID      |
+          |         |  () -> Tea  |
+          |         |  require    |
+          |         +-------------+
+  +-------|-------------------------+
+  |       V        boiled somewhere |
+  |  +----+----+                    |
+  |  | Channel |                    |
+  |  +----+----+                    |
+  |       |                         |
+  |       V        +-----------+    |
+  |    +--+--+     | PotState  |    |
+  |    | Tea |<===>|           |    |
+  |    +--+--+     |  Children |    |
+  |       |        +-----------+    |
+  |       V                         |
+  |  +----+----+                    |
+  |  | Promise |                    |
+  |  +---------+                    |
+  +---------------------------------+
 ```
 
-By putting the `@actor` macro before arbitrary callable object, we defined an
-**actor**. And we can call it as usual:
+A `Pot` is mainly a container of an arbitrary object (`tea`) which is instantiated by calling a parameterless function. Whenever a `Pot` receives a `flavor`, the water in the `Pot` is *boiled* first (a `task` is created to process `tea` and `flavor`) if it is cool (the previous `task` was exited by accident or on demand). Some `Pot`s may have a few specific `require`ments (the number of cpu, gpu). If those requirements can not be satisfied, the `Pot` will be pending to wait for new resources. Users can define how `tea` and `flavor` are processed through multiple dispatch on `process(tea, flavor)`. In some `task`s, users may create many other `Pot`s whose references (`PotID`) are stored in `Children`.  A `PotID` is simply a path used to locate a `Pot`.
 
-```julia
-A();
-```
+### Decisions
 
-You'll see something like this on your screen:
+The following design decisions need to be reviewed continuously.
 
-```
-Info:[2021-06-30 22:59:51](@/user/#1)Hello World
-```
+1. Each `Pot` can only be created inside of another `Pot`, which forms a child-parent relation. If no `Pot` is found in the `current_task()`, the parent is bind to `/user` by default. When registering a new `Pot` whose`PotID` is already registerred. The old one will be removed first. This will allow updating `Pot`s dynamically. (Do we really need this feature?)
 
-Next, let's make sure anonymous functions with positional and keyword arguments
-can also work as expected:
-
-```julia
-A = @actor (msg;suffix="!") -> @info "Hello " * msg * suffix
-A("World";suffix="!!!")
-# Info:[2021-06-30 23:00:38](@/user/#5)Hello World!!!
-```
-
-For some functions, we are more interested in the returned value.
-
-```julia
-A = @actor msg -> "Hello " * msg
-res = A("World")
-```
-
-Well, different from the general function call, a result similar to `Future` is
-returned instead of the real value. We can then fetch the result with the
-following syntax:
-
-```julia
-res[]
-# "Hello World"
-```
-
-To maintain the internal states across different calls, we can also apply `@actor`
-to a customized structure:
-
-```julia
-Base.@kwdef mutable struct Counter
-    n::Int = 0
-end
-
-(c::Counter)() = c.n += 1
-
-A = @actor Counter()
-
-for _ in 1:10
-    A()
-end
-
-n = A.n
-
-n[]
-# 10
-```
-
-Note that similar to function call, the return of `A.n` is also a `Future` like object.
-
-### Tips
-
-- Be careful with `self()`
+### FAQ
 
 ## Acknowledgement
 
-This package is mainly inspired by the following packages:
+This package is mainly inspired by the following projects:
 
-- [Actors.jl](https://github.com/JuliaActors/Actors.jl)
+- [Orleans](https://github.com/dotnet/orleans)
 - [Proto.Actor](https://proto.actor/)
 - [Ray](https://ray.io/)
+- [Actors.jl](https://github.com/JuliaActors/Actors.jl)

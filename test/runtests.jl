@@ -4,5 +4,4 @@ using Base.Threads
 
 @testset "Oolong.jl" begin
     include("core.jl")
-    include("serve.jl")
 end
