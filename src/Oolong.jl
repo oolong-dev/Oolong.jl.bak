@@ -4,6 +4,9 @@ const OL = Oolong
 export OL
 
 include("config.jl")
-include("core.jl")
+include("logging.jl")
+include("base.jl")
+include("core/core.jl")
+include("start.jl")
 
 end

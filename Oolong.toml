@@ -1,0 +1,13 @@
+banner = true
+color = true
+
+[logging]
+log_level = "Debug"
+date_format = "yyyy-mm-ddTHH:MM:SS.s"
+
+  [logging.driver_logger]
+    console_logger.is_expand_stack_trace = true
+    rotating_logger.path = "./logs"
+    rotating_logger.file_format = "YYYY-mm-dd.\\l\\o\\g"
+
+  [logging.loki_logger]

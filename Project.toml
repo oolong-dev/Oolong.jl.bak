@@ -1,14 +1,17 @@
 name = "Oolong"
 uuid = "c9dcc2fc-6356-41de-aa29-480ea90c21cd"
 authors = ["Jun Tian <tianjun.cpp@gmail.com> and contributors"]
-version = "0.1.0"
+version = "0.0.1"
 
 [deps]
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Configurations = "5218b696-f38b-4ac9-8b61-a12ec717816d"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+GarishPrint = "b0ab02a7-8576-43f7-aa76-eaa7c3897c54"
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
+LoggingExtras = "e6f89c97-d47a-5376-807f-9c37f3926c36"
+LokiLogger = "51d429d1-9683-4c89-86d7-889f440454ef"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 

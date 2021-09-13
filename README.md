@@ -69,6 +69,7 @@ Please contact us if you have a concrete scenario but not sure how to use this p
         3. ☑️ CPU/GPU allocation
         4. 🧐 Auto intall+using dependencies
         5. ☑️ Global configuration
+        6. 🧐 Close pot when it is idle for a period
     3.  Example usages
         1. 🧐 Parameter search
         2. 🧐 Batch evaluation.
@@ -80,9 +81,10 @@ Please contact us if you have a concrete scenario but not sure how to use this p
     2. Dashboard
         1. 🧐 [grafana](https://grafana.com/)
     3. Custom Logger
-        1. 🧐 [LokiLogger.jl](https://github.com/fredrikekre/LokiLogger.jl)
+        1. ☑️ [LokiLogger.jl](https://github.com/fredrikekre/LokiLogger.jl)
         2. 🧐 [Stipple.jl](https://github.com/GenieFramework/Stipple.jl)
     4. Tracing
+        1. [opentelemetry](https://opentelemetry.io/)
 1. Stage 3
     1. Drop out Distributed.jl?
         1. 🧐 `Future` will transfer the ownership of the underlying data to the caller. Not very efficient when the data is passed back and forth several times in its life circle.
@@ -133,7 +135,7 @@ A `Pot` is mainly a container of an arbitrary object (`tea`) which is instantiat
 
 The following design decisions need to be reviewed continuously.
 
-1. Each `Pot` can only be created inside of another `Pot`, which forms a child-parent relation. If no `Pot` is found in the `current_task()`, the parent is bind to `/user` by default.
+1. Each `Pot` can only be created inside of another `Pot`, which forms a child-parent relation. If no `Pot` is found in the `current_task()`, the parent is bind to `/user` by default. When registering a new `Pot` whose`PotID` is already registerred. The old one will be removed first. This will allow updating `Pot`s dynamically. (Do we really need this feature?)
 
 ### FAQ
 
